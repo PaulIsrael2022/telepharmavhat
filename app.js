@@ -28,7 +28,7 @@ mongoose
   .catch((err) => console.error("MongoDB connection error:", err));
 
 // WhatsApp Cloud API Configuration
-const WHATSAPP_API_URL = "https://graph.facebook.com/v12.0";
+const WHATSAPP_API_URL = "https://graph.facebook.com/v18.0";
 const PHONE_NUMBER_ID = process.env.WHATSAPP_CLOUD_API_FROM_PHONE_NUMBER_ID;
 const ACCESS_TOKEN = process.env.WHATSAPP_CLOUD_API_ACCESS_TOKEN;
 
@@ -60,165 +60,120 @@ async function sendWhatsAppMessage(to, message, buttons = null) {
   try {
     await axios.post(url, data, { headers });
   } catch (error) {
-    console.error("Error sending WhatsApp message:", error);
+    console.error("Error sending WhatsApp message:", error.response?.data || error.message);
   }
 }
 
-app.post("/webhook", async (req, res) => {
-  const { entry } = req.body;
+const registrationSteps = [
+  { prompt: "Please provide your first name.", field: "firstName", backAllowed: false },
+  { prompt: "Please provide your surname.", field: "surname", backAllowed: true },
+  { prompt: "Please provide your date of birth in the format DD/MM/YYYY.", field: "dateOfBirth", backAllowed: true },
+  { 
+    prompt: "Please select your medical aid provider:",
+    field: "medicalAidProvider",
+    backAllowed: true,
+    options: ["BOMAID", "PULA", "BPOMAS", "BOTSOGO"]
+  },
+  { prompt: "Please provide your medical aid number.", field: "medicalAidNumber", backAllowed: true },
+  { 
+    prompt: "Please specify your scheme (if applicable).",
+    field: "scheme",
+    backAllowed: true,
+    options: ["N/A"]
+  },
+  { 
+    prompt: "If you have a dependent number, please provide it.",
+    field: "dependentNumber",
+    backAllowed: true,
+    options: ["N/A"]
+  },
+];
 
-  if (entry && entry[0].changes && entry[0].changes[0].value.messages) {
-    const message = entry[0].changes[0].value.messages[0];
-    const from = message.from;
-    const messageBody = message.text?.body || "";
+async function sendRegistrationPrompt(user) {
+  const step = registrationSteps[user.registrationStep - 1];
+  let buttons = [];
 
-    try {
-      let user = await User.findOne({ phoneNumber: from });
-
-      if (!user) {
-        // Create a new user with only the phone number
-        user = new User({ 
-          phoneNumber: from,
-          registrationStep: 1
-        });
-        await user.save();
-        await sendWelcomeMessage(user);
-      } else {
-        user.lastInteraction = new Date();
-        await user.save();
-        
-        if (!user.isRegistrationComplete) {
-          await handleRegistration(user, messageBody);
-        } else {
-          await handleUserInput(user, messageBody);
-        }
-      }
-    } catch (error) {
-      console.error("Error processing webhook:", error);
-    }
+  if (step.options) {
+    buttons = step.options.map(option => ({
+      type: "reply",
+      reply: { id: option, title: option }
+    }));
   }
 
-  res.sendStatus(200);
-});
+  if (step.backAllowed) {
+    buttons.push({ type: "reply", reply: { id: "BACK", title: "Back" } });
+  }
 
-async function sendWelcomeMessage(user) {
-  await sendWhatsAppMessage(
-    user.phoneNumber,
-    "Welcome to Telepharma Botswana! Let's start the registration process.\n\nStep 1: Please provide your first name."
-  );
-}
+  if (!step.options) {
+    buttons.push({ type: "reply", reply: { id: "SKIP", title: "Skip" } });
+  }
 
-async function sendWelcomeMessage(user) {
-  await sendWhatsAppMessage(
-    user.phoneNumber,
-    "Welcome to Telepharma Botswana! Let's start the registration process.\n\nStep 1: Please provide your first name."
-  );
+  await sendWhatsAppMessage(user.phoneNumber, step.prompt, buttons);
 }
 
 async function handleRegistration(user, message) {
   try {
-    switch (user.registrationStep) {
-      case 1:
-        user.firstName = message;
-        user.registrationStep = 2;
-        await user.save();
-        await sendWhatsAppMessage(
-          user.phoneNumber,
-          "Step 2: Please provide your surname."
-        );
+    if (message === "BACK" && user.registrationStep > 1 && registrationSteps[user.registrationStep - 1].backAllowed) {
+      user.registrationStep--;
+      user.registrationData.delete(registrationSteps[user.registrationStep].field);
+      await user.save();
+      await sendRegistrationPrompt(user);
+      return;
+    }
+
+    const step = registrationSteps[user.registrationStep - 1];
+    let isValid = true;
+    let parsedValue = message;
+
+    // Input validation
+    switch (step.field) {
+      case "dateOfBirth":
+        const dateRegex = /^\d{2}\/\d{2}\/\d{4}$/;
+        if (!dateRegex.test(message)) {
+          isValid = false;
+        } else {
+          const [day, month, year] = message.split('/');
+          parsedValue = new Date(year, month - 1, day);
+        }
         break;
-      case 2:
-        user.surname = message;
-        user.registrationStep = 3;
-        await user.save();
-        await sendWhatsAppMessage(
-          user.phoneNumber,
-          "Step 3: Please provide your date of birth in the format DD/MM/YYYY."
-        );
+      case "medicalAidProvider":
+        if (!step.options.includes(message)) {
+          isValid = false;
+        }
         break;
-      case 3:
-        const [day, month, year] = message.split('/');
-        user.dateOfBirth = new Date(year, month - 1, day); // month is 0-indexed in JS Date
-        user.registrationStep = 4;
-        await user.save();
-        await sendWhatsAppMessage(
-          user.phoneNumber,
-          "Step 4: Please select your medical aid provider:",
-          [
-            { type: "reply", reply: { id: "BOMAID", title: "BOMAID" } },
-            { type: "reply", reply: { id: "PULA", title: "PULA" } },
-            { type: "reply", reply: { id: "BPOMAS", title: "BPOMAS" } },
-            { type: "reply", reply: { id: "BOTSOGO", title: "BOTSOGO" } },
-          ]
-        );
+      case "scheme":
+      case "dependentNumber":
+        if (message === "N/A") {
+          parsedValue = null;
+        } else if (message === "SKIP") {
+          parsedValue = null;
+          isValid = true;
+        }
         break;
-      case 4:
-        user.medicalAidProvider = message;
-        user.registrationStep = 5;
-        await user.save();
-        await sendWhatsAppMessage(
-          user.phoneNumber,
-          "Step 5: Please provide your medical aid number."
-        );
-        break;
-      case 5:
-        user.medicalAidNumber = message;
-        user.registrationStep = 6;
-        await user.save();
-        await sendWhatsAppMessage(
-          user.phoneNumber,
-          "Step 6: Please specify your scheme (if applicable). If not applicable, type 'N/A'."
-        );
-        break;
-      case 6:
-        user.scheme = message === 'N/A' ? null : message;
-        user.registrationStep = 7;
-        await user.save();
-        await sendWhatsAppMessage(
-          user.phoneNumber,
-          "Step 7: If you have a dependent number, please provide it. If not applicable, type 'N/A'."
-        );
-        break;
-      case 7:
-        user.dependentNumber = message === 'N/A' ? null : message;
-        user.isRegistrationComplete = true;
-        await user.save();
-        await sendWhatsAppMessage(
-          user.phoneNumber,
-          `Thank you for completing your registration, ${user.firstName}! You can now use our services. What would you like to do?`,
-          [
-            {
-              type: "reply",
-              reply: { id: "MEDICATION_DELIVERY", title: "Medication Delivery" },
-            },
-            {
-              type: "reply",
-              reply: {
-                id: "PHARMACY_CONSULTATION",
-                title: "Pharmacy Consultation",
-              },
-            },
-            {
-              type: "reply",
-              reply: { id: "DOCTOR_CONSULTATION", title: "Doctor Consultation" },
-            },
-            {
-              type: "reply",
-              reply: { id: "CHECK_ORDER_STATUS", title: "Check Order Status" },
-            },
-            {
-              type: "reply",
-              reply: { id: "GENERAL_ENQUIRY", title: "General Enquiry" },
-            },
-          ]
-        );
-        break;
-      default:
-        console.error(`Unexpected registration step: ${user.registrationStep}`);
-        await sendWhatsAppMessage(
-          user.phoneNumber,
-          "We encountered an error in the registration process. Please contact support for assistance."
-        );
+    }
+
+    if (!isValid) {
+      await sendWhatsAppMessage(user.phoneNumber, "Invalid input. Please try again.");
+      await sendRegistrationPrompt(user);
+      return;
+    }
+
+    if (parsedValue !== null) {
+      user.registrationData.set(step.field, parsedValue);
+    }
+
+    if (user.registrationStep < registrationSteps.length) {
+      user.registrationStep++;
+      await user.save();
+      await sendRegistrationPrompt(user);
+    } else {
+      // Registration complete
+      for (const [field, value] of user.registrationData) {
+        user[field] = value;
+      }
+      user.isRegistrationComplete = true;
+      await user.save();
+      await sendMainMenu(user);
     }
   } catch (error) {
     console.error("Error in handleRegistration:", error);
@@ -227,6 +182,14 @@ async function handleRegistration(user, message) {
       "We encountered an error processing your registration. Please try again or contact support if the issue persists."
     );
   }
+}
+
+async function sendWelcomeMessage(user) {
+  await sendWhatsAppMessage(
+    user.phoneNumber,
+    "Welcome to Telepharma Botswana! Let's start the registration process."
+  );
+  await sendRegistrationPrompt(user);
 }
 
 async function sendMainMenu(user) {
@@ -300,21 +263,18 @@ async function handleUserInput(user, message) {
         user.phoneNumber,
         "A healthcare professional will be with you shortly. Please wait for their response."
       );
-      // Here you would typically notify a staff member or add the user to a queue
       break;
     case "CHECK_ORDER_STATUS":
       await sendOrderStatus(user);
       break;
     default:
       if (message.startsWith("http")) {
-        // Assume this is a prescription photo URL
         await createPrescription(user, { prescriptionPhotoUrl: message });
         await sendWhatsAppMessage(
           user.phoneNumber,
           "Thank you for providing your prescription. We'll process your request, and a pharmacist will review it. Your medication will be delivered soon."
         );
       } else {
-        // Assume this is prescription text or OTC medicine name
         await createPrescription(user, { prescriptionText: message });
         await sendWhatsAppMessage(
           user.phoneNumber,
@@ -387,6 +347,43 @@ async function sendOrderStatus(user) {
     ]);
   }
 }
+
+app.post("/webhook", async (req, res) => {
+  const { entry } = req.body;
+
+  if (entry && entry[0].changes && entry[0].changes[0].value.messages) {
+    const message = entry[0].changes[0].value.messages[0];
+    const from = message.from;
+    const messageBody = message.text?.body || "";
+
+    try {
+      let user = await User.findOne({ phoneNumber: from });
+
+      if (!user) {
+        user = new User({ 
+          phoneNumber: from,
+          registrationStep: 1,
+          registrationData: new Map()
+        });
+        await user.save();
+        await sendWelcomeMessage(user);
+      } else {
+        user.lastInteraction = new Date();
+        await user.save();
+        
+        if (!user.isRegistrationComplete) {
+          await handleRegistration(user, messageBody);
+        } else {
+          await handleUserInput(user, messageBody);
+        }
+      }
+    } catch (error) {
+      console.error("Error processing webhook:", error);
+    }
+  }
+
+  res.sendStatus(200);
+});
 
 // Webhook verification endpoint
 app.get("/webhook", (req, res) => {
