@@ -94,18 +94,22 @@ async function sendRegistrationPrompt(user) {
   let buttons = [];
 
   if (step.options) {
-    buttons = step.options.map(option => ({
+    // Limit options to 2 if there are more than 2 options
+    const limitedOptions = step.options.slice(0, 2);
+    buttons = limitedOptions.map(option => ({
       type: "reply",
       reply: { id: option, title: option }
     }));
   }
 
-  if (step.backAllowed) {
+  // Always add "Back" button if allowed, unless we already have 3 buttons
+  if (step.backAllowed && buttons.length < 3) {
     buttons.push({ type: "reply", reply: { id: "BACK", title: "Back" } });
   }
 
-  if (!step.options) {
-    buttons.push({ type: "reply", reply: { id: "SKIP", title: "Skip" } });
+  // If we have no buttons, add a "Continue" button
+  if (buttons.length === 0) {
+    buttons.push({ type: "reply", reply: { id: "CONTINUE", title: "Continue" } });
   }
 
   await sendWhatsAppMessage(user.phoneNumber, step.prompt, buttons);
@@ -134,10 +138,13 @@ async function handleRegistration(user, message) {
         } else {
           const [day, month, year] = message.split('/');
           parsedValue = new Date(year, month - 1, day);
+          if (isNaN(parsedValue.getTime())) {
+            isValid = false;
+          }
         }
         break;
       case "medicalAidProvider":
-        if (!step.options.includes(message)) {
+        if (step.options && !step.options.includes(message)) {
           isValid = false;
         }
         break;
@@ -145,11 +152,12 @@ async function handleRegistration(user, message) {
       case "dependentNumber":
         if (message === "N/A") {
           parsedValue = null;
-        } else if (message === "SKIP") {
-          parsedValue = null;
-          isValid = true;
         }
         break;
+    }
+
+    if (message === "CONTINUE") {
+      isValid = true;
     }
 
     if (!isValid) {
@@ -212,14 +220,6 @@ async function sendMainMenu(user) {
         type: "reply",
         reply: { id: "DOCTOR_CONSULTATION", title: "Doctor Consultation" },
       },
-      {
-        type: "reply",
-        reply: { id: "CHECK_ORDER_STATUS", title: "Check Order Status" },
-      },
-      {
-        type: "reply",
-        reply: { id: "GENERAL_ENQUIRY", title: "General Enquiry" },
-      },
     ]
   );
 }
@@ -257,7 +257,6 @@ async function handleUserInput(user, message) {
       break;
     case "PHARMACY_CONSULTATION":
     case "DOCTOR_CONSULTATION":
-    case "GENERAL_ENQUIRY":
       await createServiceRequest(user, message);
       await sendWhatsAppMessage(
         user.phoneNumber,
