@@ -181,7 +181,7 @@ async function handleRegistration(user, message) {
         break;
       case 7:
         user.dependentNumber = message === 'N/A' ? null : message;
-        user.registrationStep = 8;
+        user.isRegistrationComplete = true;
         await user.save();
         await sendWhatsAppMessage(
           user.phoneNumber,
