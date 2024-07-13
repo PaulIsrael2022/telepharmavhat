@@ -1,21 +1,37 @@
 const mongoose = require("mongoose");
 
 // User Schema
-const userSchema = new mongoose.Schema({
-  phoneNumber: { type: String, unique: true, required: true },
-  firstName: { type: String, default: null },
-  surname: { type: String, default: null },
-  dateOfBirth: { type: Date, default: null },
-  medicalAidProvider: { type: String, default: null },
-  medicalAidNumber: { type: String, default: null },
-  scheme: { type: String, default: null },
-  dependentNumber: { type: String, default: null },
-  registrationStep: { type: Number, default: 1 },
-  lastInteraction: { type: Date, default: Date.now },
-  isRegistrationComplete: { type: Boolean, default: false }
-}, {
-  timestamps: true
-});
+const userSchema = new mongoose.Schema(
+  {
+    phoneNumber: { type: String, unique: true, required: true },
+    firstName: { type: String, default: null },
+    surname: { type: String, default: null },
+    dateOfBirth: { type: Date, default: null },
+    medicalAidProvider: { type: String, default: null },
+    medicalAidNumber: { type: String, default: null },
+    scheme: { type: String, default: null },
+    dependentNumber: { type: String, default: null },
+    registrationStep: { type: Number, default: 1 },
+    isRegistrationComplete: { type: Boolean, default: false },
+    lastInteraction: { type: Date, default: Date.now },
+    preferences: {
+      notificationPreference: {
+        type: String,
+        enum: ["SMS", "WhatsApp", "Email"],
+        default: "WhatsApp",
+      },
+      language: { type: String, default: "English" },
+    },
+    registrationData: {
+      type: Map,
+      of: String,
+      default: () => new Map(),
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
 
 // Prescription Schema
 const prescriptionSchema = new mongoose.Schema(
@@ -131,16 +147,6 @@ const inventorySchema = new mongoose.Schema(
     timestamps: true,
   }
 );
-
-// Add a pre-save hook to validate required fields only if registration is complete
-userSchema.pre('save', function(next) {
-  if (this.isRegistrationComplete) {
-    if (!this.firstName || !this.surname || !this.dateOfBirth || !this.medicalAidProvider || !this.medicalAidNumber) {
-      return next(new Error('All required fields must be filled before completing registration.'));
-    }
-  }
-  next();
-});
 
 const User = mongoose.model("User", userSchema);
 const Prescription = mongoose.model("Prescription", prescriptionSchema);
