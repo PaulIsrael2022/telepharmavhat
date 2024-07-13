@@ -64,7 +64,6 @@ async function sendWhatsAppMessage(to, message, buttons = null) {
   }
 }
 
-// Webhook endpoint for WhatsApp
 app.post("/webhook", async (req, res) => {
   const { entry } = req.body;
 
@@ -77,14 +76,18 @@ app.post("/webhook", async (req, res) => {
       let user = await User.findOne({ phoneNumber: from });
 
       if (!user) {
-        user = new User({ phoneNumber: from, registrationStep: 1 });
+        // Create a new user with only the phone number
+        user = new User({ 
+          phoneNumber: from,
+          registrationStep: 1
+        });
         await user.save();
         await sendWelcomeMessage(user);
       } else {
         user.lastInteraction = new Date();
         await user.save();
-
-        if (user.registrationStep < 8) {
+        
+        if (!user.isRegistrationComplete) {
           await handleRegistration(user, messageBody);
         } else {
           await handleUserInput(user, messageBody);
@@ -97,6 +100,13 @@ app.post("/webhook", async (req, res) => {
 
   res.sendStatus(200);
 });
+
+async function sendWelcomeMessage(user) {
+  await sendWhatsAppMessage(
+    user.phoneNumber,
+    "Welcome to Telepharma Botswana! Let's start the registration process.\n\nStep 1: Please provide your first name."
+  );
+}
 
 async function sendWelcomeMessage(user) {
   await sendWhatsAppMessage(
