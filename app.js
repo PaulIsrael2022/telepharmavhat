@@ -106,73 +106,116 @@ async function sendWelcomeMessage(user) {
 }
 
 async function handleRegistration(user, message) {
-  switch (user.registrationStep) {
-    case 1:
-      user.firstName = message;
-      user.registrationStep = 2;
-      await user.save();
-      await sendWhatsAppMessage(
-        user.phoneNumber,
-        "Step 2: Please provide your surname."
-      );
-      break;
-    case 2:
-      user.surname = message;
-      user.registrationStep = 3;
-      await user.save();
-      await sendWhatsAppMessage(
-        user.phoneNumber,
-        "Step 3: Please provide your date of birth in the format DD/MM/YYYY."
-      );
-      break;
-    case 3:
-      user.dateOfBirth = new Date(message.split("/").reverse().join("-"));
-      user.registrationStep = 4;
-      await user.save();
-      await sendWhatsAppMessage(
-        user.phoneNumber,
-        "Step 4: Please select your medical aid provider:",
-        [
-          { type: "reply", reply: { id: "BOMAID", title: "BOMAID" } },
-          { type: "reply", reply: { id: "PULA", title: "PULA" } },
-          { type: "reply", reply: { id: "BPOMAS", title: "BPOMAS" } },
-          { type: "reply", reply: { id: "BOTSOGO", title: "BOTSOGO" } },
-        ]
-      );
-      break;
-    case 4:
-      user.medicalAidProvider = message;
-      user.registrationStep = 5;
-      await user.save();
-      await sendWhatsAppMessage(
-        user.phoneNumber,
-        "Step 5: Please provide your medical aid number."
-      );
-      break;
-    case 5:
-      user.medicalAidNumber = message;
-      user.registrationStep = 6;
-      await user.save();
-      await sendWhatsAppMessage(
-        user.phoneNumber,
-        "Step 6: Please specify your scheme (if applicable)."
-      );
-      break;
-    case 6:
-      user.scheme = message;
-      user.registrationStep = 7;
-      await user.save();
-      await sendWhatsAppMessage(
-        user.phoneNumber,
-        'Step 7: If you have a dependent number, please provide it. Otherwise, type "N/A."'
-      );
-      break;
-    case 7:
-      user.dependentNumber = message;
-      user.registrationStep = 8;
-      await user.save();
-      await sendMainMenu(user);
-      break;
+  try {
+    switch (user.registrationStep) {
+      case 1:
+        user.firstName = message;
+        user.registrationStep = 2;
+        await user.save();
+        await sendWhatsAppMessage(
+          user.phoneNumber,
+          "Step 2: Please provide your surname."
+        );
+        break;
+      case 2:
+        user.surname = message;
+        user.registrationStep = 3;
+        await user.save();
+        await sendWhatsAppMessage(
+          user.phoneNumber,
+          "Step 3: Please provide your date of birth in the format DD/MM/YYYY."
+        );
+        break;
+      case 3:
+        const [day, month, year] = message.split('/');
+        user.dateOfBirth = new Date(year, month - 1, day); // month is 0-indexed in JS Date
+        user.registrationStep = 4;
+        await user.save();
+        await sendWhatsAppMessage(
+          user.phoneNumber,
+          "Step 4: Please select your medical aid provider:",
+          [
+            { type: "reply", reply: { id: "BOMAID", title: "BOMAID" } },
+            { type: "reply", reply: { id: "PULA", title: "PULA" } },
+            { type: "reply", reply: { id: "BPOMAS", title: "BPOMAS" } },
+            { type: "reply", reply: { id: "BOTSOGO", title: "BOTSOGO" } },
+          ]
+        );
+        break;
+      case 4:
+        user.medicalAidProvider = message;
+        user.registrationStep = 5;
+        await user.save();
+        await sendWhatsAppMessage(
+          user.phoneNumber,
+          "Step 5: Please provide your medical aid number."
+        );
+        break;
+      case 5:
+        user.medicalAidNumber = message;
+        user.registrationStep = 6;
+        await user.save();
+        await sendWhatsAppMessage(
+          user.phoneNumber,
+          "Step 6: Please specify your scheme (if applicable). If not applicable, type 'N/A'."
+        );
+        break;
+      case 6:
+        user.scheme = message === 'N/A' ? null : message;
+        user.registrationStep = 7;
+        await user.save();
+        await sendWhatsAppMessage(
+          user.phoneNumber,
+          "Step 7: If you have a dependent number, please provide it. If not applicable, type 'N/A'."
+        );
+        break;
+      case 7:
+        user.dependentNumber = message === 'N/A' ? null : message;
+        user.registrationStep = 8;
+        await user.save();
+        await sendWhatsAppMessage(
+          user.phoneNumber,
+          `Thank you for completing your registration, ${user.firstName}! You can now use our services. What would you like to do?`,
+          [
+            {
+              type: "reply",
+              reply: { id: "MEDICATION_DELIVERY", title: "Medication Delivery" },
+            },
+            {
+              type: "reply",
+              reply: {
+                id: "PHARMACY_CONSULTATION",
+                title: "Pharmacy Consultation",
+              },
+            },
+            {
+              type: "reply",
+              reply: { id: "DOCTOR_CONSULTATION", title: "Doctor Consultation" },
+            },
+            {
+              type: "reply",
+              reply: { id: "CHECK_ORDER_STATUS", title: "Check Order Status" },
+            },
+            {
+              type: "reply",
+              reply: { id: "GENERAL_ENQUIRY", title: "General Enquiry" },
+            },
+          ]
+        );
+        break;
+      default:
+        console.error(`Unexpected registration step: ${user.registrationStep}`);
+        await sendWhatsAppMessage(
+          user.phoneNumber,
+          "We encountered an error in the registration process. Please contact support for assistance."
+        );
+    }
+  } catch (error) {
+    console.error("Error in handleRegistration:", error);
+    await sendWhatsAppMessage(
+      user.phoneNumber,
+      "We encountered an error processing your registration. Please try again or contact support if the issue persists."
+    );
   }
 }
 
