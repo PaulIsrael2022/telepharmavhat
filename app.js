@@ -59,7 +59,7 @@ const PHONE_NUMBER_ID = process.env.WHATSAPP_CLOUD_API_FROM_PHONE_NUMBER_ID;
 const ACCESS_TOKEN = process.env.WHATSAPP_CLOUD_API_ACCESS_TOKEN;
 
 // Helper function to send WhatsApp messages
-async function sendWhatsAppMessage(to, message, buttons = null) {
+async function sendWhatsAppMessage(to, message) {
   const url = `${WHATSAPP_API_URL}/${PHONE_NUMBER_ID}/messages`;
   const headers = {
     Authorization: `Bearer ${ACCESS_TOKEN}`,
@@ -74,15 +74,6 @@ async function sendWhatsAppMessage(to, message, buttons = null) {
     text: { body: message },
   };
 
-  if (buttons && buttons.length > 0) {
-    data.type = "interactive";
-    data.interactive = {
-      type: "button",
-      body: { text: message },
-      action: { buttons: buttons },
-    };
-  }
-
   try {
     await axios.post(url, data, { headers });
   } catch (error) {
@@ -95,12 +86,12 @@ const registrationSteps = [
   { prompt: "Step 2: Please provide your surname.", field: "surname" },
   { prompt: "Step 3: Please provide your date of birth in the format DD/MM/YYYY.", field: "dateOfBirth" },
   { 
-    prompt: "Step 4: Please select your gender:",
+    prompt: "Step 4: Please select your gender:\n1. MALE\n2. FEMALE",
     field: "gender",
     options: ["MALE", "FEMALE"]
   },
   { 
-    prompt: "Step 5: Please select your medical aid provider:",
+    prompt: "Step 5: Please select your medical aid provider. Type a number:\n1. BOMAID\n2. PULA\n3. BPOMAS\n4. BOTSOGO",
     field: "medicalAidProvider",
     options: ["BOMAID", "PULA", "BPOMAS", "BOTSOGO"]
   },
@@ -111,26 +102,18 @@ const registrationSteps = [
 
 async function sendRegistrationPrompt(user) {
   const step = registrationSteps[user.registrationStep - 1];
-  let buttons = [];
+  let message = step.prompt;
 
-  if (step.options) {
-    buttons = step.options.map(option => ({
-      type: "reply",
-      reply: { id: option, title: option.substring(0, 20) }
-    }));
+  if (user.registrationStep > 1) {
+    message += "\n\n_Enter \"00\" to go back to the previous step._";
   }
 
-  // Add "Back" button if not the first step and we have less than 3 buttons
-  if (user.registrationStep > 1 && buttons.length < 3) {
-    buttons.push({ type: "reply", reply: { id: "BACK", title: "Back" } });
-  }
-
-  await sendWhatsAppMessage(user.phoneNumber, step.prompt, buttons.length > 0 ? buttons : null);
+  await sendWhatsAppMessage(user.phoneNumber, message);
 }
 
 async function handleRegistration(user, message) {
   try {
-    if (message.toUpperCase() === "BACK" && user.registrationStep > 1) {
+    if (message === "00" && user.registrationStep > 1) {
       user.registrationStep--;
       user.registrationData.delete(registrationSteps[user.registrationStep].field);
       await user.save();
@@ -157,8 +140,15 @@ async function handleRegistration(user, message) {
         }
         break;
       case "gender":
+        if (message === "1") parsedValue = "MALE";
+        else if (message === "2") parsedValue = "FEMALE";
+        else isValid = false;
+        break;
       case "medicalAidProvider":
-        if (step.options && !step.options.includes(message)) {
+        const index = parseInt(message) - 1;
+        if (index >= 0 && index < step.options.length) {
+          parsedValue = step.options[index];
+        } else {
           isValid = false;
         }
         break;
@@ -213,7 +203,7 @@ app.post("/webhook", async (req, res) => {
   if (entry && entry[0].changes && entry[0].changes[0].value.messages) {
     const message = entry[0].changes[0].value.messages[0];
     const from = message.from;
-    const messageBody = message.text?.body || message.interactive?.button_reply?.title || "";
+    const messageBody = message.text?.body || "";
 
     try {
       let user = await User.findOne({ phoneNumber: from });
