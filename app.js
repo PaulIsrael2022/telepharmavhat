@@ -27,6 +27,7 @@ const userSchema = new mongoose.Schema({
   registrationStep: { type: Number, default: 1 },
   isRegistrationComplete: { type: Boolean, default: false },
   lastInteraction: { type: Date, default: Date.now },
+  lastWelcomeMessage: { type: Date, default: null },
   registrationData: {
     type: Map,
     of: String,
@@ -59,7 +60,7 @@ const PHONE_NUMBER_ID = process.env.WHATSAPP_CLOUD_API_FROM_PHONE_NUMBER_ID;
 const ACCESS_TOKEN = process.env.WHATSAPP_CLOUD_API_ACCESS_TOKEN;
 
 // Helper function to send WhatsApp messages
-async function sendWhatsAppMessage(to, message) {
+async function sendWhatsAppMessage(to, message, buttons = null) {
   const url = `${WHATSAPP_API_URL}/${PHONE_NUMBER_ID}/messages`;
   const headers = {
     Authorization: `Bearer ${ACCESS_TOKEN}`,
@@ -74,6 +75,15 @@ async function sendWhatsAppMessage(to, message) {
     text: { body: message },
   };
 
+  if (buttons) {
+    data.type = "interactive";
+    data.interactive = {
+      type: "button",
+      body: { text: message },
+      action: { buttons: buttons },
+    };
+  }
+
   try {
     await axios.post(url, data, { headers });
   } catch (error) {
@@ -86,7 +96,7 @@ const registrationSteps = [
   { prompt: "Step 2: Please provide your surname.", field: "surname" },
   { prompt: "Step 3: Please provide your date of birth in the format DD/MM/YYYY.", field: "dateOfBirth" },
   { 
-    prompt: "Step 4: Please select your gender:\n1. MALE\n2. FEMALE",
+    prompt: "Step 4: Please select your gender:",
     field: "gender",
     options: ["MALE", "FEMALE"]
   },
@@ -108,7 +118,15 @@ async function sendRegistrationPrompt(user) {
     message += "\n\n_Enter \"00\" to go back to the previous step._";
   }
 
-  await sendWhatsAppMessage(user.phoneNumber, message);
+  if (step.field === "gender") {
+    const buttons = [
+      { type: "reply", reply: { id: "MALE", title: "MALE" } },
+      { type: "reply", reply: { id: "FEMALE", title: "FEMALE" } },
+    ];
+    await sendWhatsAppMessage(user.phoneNumber, message, buttons);
+  } else {
+    await sendWhatsAppMessage(user.phoneNumber, message);
+  }
 }
 
 async function handleRegistration(user, message) {
@@ -140,9 +158,9 @@ async function handleRegistration(user, message) {
         }
         break;
       case "gender":
-        if (message === "1") parsedValue = "MALE";
-        else if (message === "2") parsedValue = "FEMALE";
-        else isValid = false;
+        if (message !== "MALE" && message !== "FEMALE") {
+          isValid = false;
+        }
         break;
       case "medicalAidProvider":
         const index = parseInt(message) - 1;
@@ -178,7 +196,7 @@ async function handleRegistration(user, message) {
       }
       user.isRegistrationComplete = true;
       await user.save();
-      await sendWhatsAppMessage(user.phoneNumber, `Thank you for registering, ${user.firstName}! Your registration is now complete. You can now use our WhatsApp medication delivery service.`);
+      await sendCompletionMessage(user);
     }
   } catch (error) {
     console.error("Error in handleRegistration:", error);
@@ -189,6 +207,15 @@ async function handleRegistration(user, message) {
   }
 }
 
+async function sendCompletionMessage(user) {
+  const message = `Thank you for registering, ${user.firstName}! Your registration is now complete. You can now use our WhatsApp medication delivery service.`;
+  const buttons = [
+    { type: "reply", reply: { id: "PLACE_ORDER", title: "Place An Order" } },
+    { type: "reply", reply: { id: "MAIN_MENU", title: "Main Menu" } },
+  ];
+  await sendWhatsAppMessage(user.phoneNumber, message, buttons);
+}
+
 async function sendWelcomeMessage(user) {
   await sendWhatsAppMessage(
     user.phoneNumber,
@@ -197,13 +224,22 @@ async function sendWelcomeMessage(user) {
   await sendRegistrationPrompt(user);
 }
 
+async function sendWelcomeBackMessage(user) {
+  const message = `Welcome back ${user.firstName}, Would you like to`;
+  const buttons = [
+    { type: "reply", reply: { id: "PLACE_ORDER", title: "Place an order" } },
+    { type: "reply", reply: { id: "MAIN_MENU", title: "Main Menu" } },
+  ];
+  await sendWhatsAppMessage(user.phoneNumber, message, buttons);
+}
+
 app.post("/webhook", async (req, res) => {
   const { entry } = req.body;
 
   if (entry && entry[0].changes && entry[0].changes[0].value.messages) {
     const message = entry[0].changes[0].value.messages[0];
     const from = message.from;
-    const messageBody = message.text?.body || "";
+    const messageBody = message.text?.body || message.interactive?.button_reply?.id || "";
 
     try {
       let user = await User.findOne({ phoneNumber: from });
@@ -223,7 +259,23 @@ app.post("/webhook", async (req, res) => {
         if (!user.isRegistrationComplete) {
           await handleRegistration(user, messageBody);
         } else {
-          await sendWhatsAppMessage(user.phoneNumber, "Your registration is already complete. How can we assist you with our medication delivery service today?");
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          
+          if (!user.lastWelcomeMessage || user.lastWelcomeMessage < today) {
+            await sendWelcomeBackMessage(user);
+            user.lastWelcomeMessage = new Date();
+            await user.save();
+          } else {
+            // Handle other interactions for registered users here
+            if (messageBody === "PLACE_ORDER") {
+              await sendWhatsAppMessage(user.phoneNumber, "Great! Let's start your order. (Implement order placement logic here)");
+            } else if (messageBody === "MAIN_MENU") {
+              await sendWhatsAppMessage(user.phoneNumber, "Welcome to the main menu. (Implement main menu options here)");
+            } else {
+              await sendWelcomeBackMessage(user);
+            }
+          }
         }
       }
     } catch (error) {
