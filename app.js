@@ -27,7 +27,6 @@ const userSchema = new mongoose.Schema({
   registrationStep: { type: Number, default: 1 },
   isRegistrationComplete: { type: Boolean, default: false },
   lastInteraction: { type: Date, default: Date.now },
-  lastWelcomeMessage: { type: Date, default: null },
   registrationData: {
     type: Map,
     of: String,
@@ -224,8 +223,8 @@ async function sendWelcomeMessage(user) {
   await sendRegistrationPrompt(user);
 }
 
-async function sendWelcomeBackMessage(user) {
-  const message = `Welcome back ${user.firstName}, Would you like to`;
+async function sendOptionsMessage(user) {
+  const message = `Hello ${user.firstName}, how can we assist you today?`;
   const buttons = [
     { type: "reply", reply: { id: "PLACE_ORDER", title: "Place an order" } },
     { type: "reply", reply: { id: "MAIN_MENU", title: "Main Menu" } },
@@ -259,22 +258,13 @@ app.post("/webhook", async (req, res) => {
         if (!user.isRegistrationComplete) {
           await handleRegistration(user, messageBody);
         } else {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          
-          if (!user.lastWelcomeMessage || user.lastWelcomeMessage < today) {
-            await sendWelcomeBackMessage(user);
-            user.lastWelcomeMessage = new Date();
-            await user.save();
+          // Handle interactions for registered users
+          if (messageBody === "PLACE_ORDER") {
+            await sendWhatsAppMessage(user.phoneNumber, "Great! Let's start your order. (Implement order placement logic here)");
+          } else if (messageBody === "MAIN_MENU") {
+            await sendWhatsAppMessage(user.phoneNumber, "Welcome to the main menu. (Implement main menu options here)");
           } else {
-            // Handle other interactions for registered users here
-            if (messageBody === "PLACE_ORDER") {
-              await sendWhatsAppMessage(user.phoneNumber, "Great! Let's start your order. (Implement order placement logic here)");
-            } else if (messageBody === "MAIN_MENU") {
-              await sendWhatsAppMessage(user.phoneNumber, "Welcome to the main menu. (Implement main menu options here)");
-            } else {
-              await sendWelcomeBackMessage(user);
-            }
+            await sendOptionsMessage(user);
           }
         }
       }
