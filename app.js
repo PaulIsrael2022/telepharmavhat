@@ -15,6 +15,11 @@ const userSchema = new mongoose.Schema({
   firstName: { type: String, default: null },
   surname: { type: String, default: null },
   dateOfBirth: { type: Date, default: null },
+  gender: {
+    type: String,
+    enum: ["MALE", "FEMALE"],
+    default: null
+  },
   medicalAidProvider: { type: String, default: null },
   medicalAidNumber: { type: String, default: null },
   scheme: { type: String, default: null },
@@ -26,11 +31,6 @@ const userSchema = new mongoose.Schema({
     type: Map,
     of: String,
     default: () => new Map(),
-  },
-  gender: {
-    type: String,
-    enum: ["MALE", "FEMALE"],
-    default: null
   },
   preferences: {
     notificationPreference: {
@@ -95,13 +95,18 @@ const registrationSteps = [
   { prompt: "Step 2: Please provide your surname.", field: "surname" },
   { prompt: "Step 3: Please provide your date of birth in the format DD/MM/YYYY.", field: "dateOfBirth" },
   { 
-    prompt: "Step 4: Please select your medical aid provider:",
+    prompt: "Step 4: Please select your gender:",
+    field: "gender",
+    options: ["MALE", "FEMALE"]
+  },
+  { 
+    prompt: "Step 5: Please select your medical aid provider:",
     field: "medicalAidProvider",
     options: ["BOMAID", "PULA", "BPOMAS", "BOTSOGO"]
   },
-  { prompt: "Step 5: Please provide your medical aid number.", field: "medicalAidNumber" },
-  { prompt: "Step 6: Please specify your scheme (if applicable).", field: "scheme" },
-  { prompt: "Step 7: If you have a dependent number, please provide it. Otherwise, type \"N/A\".", field: "dependentNumber" },
+  { prompt: "Step 6: Please provide your medical aid number.", field: "medicalAidNumber" },
+  { prompt: "Step 7: Please specify your scheme (if applicable).", field: "scheme" },
+  { prompt: "Step 8: If you have a dependent number, please provide it. Otherwise, type \"N/A\".", field: "dependentNumber" },
 ];
 
 async function sendRegistrationPrompt(user) {
@@ -109,25 +114,18 @@ async function sendRegistrationPrompt(user) {
   let buttons = [];
 
   if (step.options) {
-    // Limit options to 2 if there are more than 2 options
-    const limitedOptions = step.options.slice(0, 2);
-    buttons = limitedOptions.map(option => ({
+    buttons = step.options.map(option => ({
       type: "reply",
       reply: { id: option, title: option.substring(0, 20) }
     }));
   }
 
-  // Always add "Back" button if not the first step and we have less than 3 buttons
+  // Add "Back" button if not the first step and we have less than 3 buttons
   if (user.registrationStep > 1 && buttons.length < 3) {
     buttons.push({ type: "reply", reply: { id: "BACK", title: "Back" } });
   }
 
-  // If we have no buttons, add a "Continue" button
-  if (buttons.length === 0) {
-    buttons.push({ type: "reply", reply: { id: "CONTINUE", title: "Continue" } });
-  }
-
-  await sendWhatsAppMessage(user.phoneNumber, step.prompt, buttons);
+  await sendWhatsAppMessage(user.phoneNumber, step.prompt, buttons.length > 0 ? buttons : null);
 }
 
 async function handleRegistration(user, message) {
@@ -137,16 +135,6 @@ async function handleRegistration(user, message) {
       user.registrationData.delete(registrationSteps[user.registrationStep].field);
       await user.save();
       await sendRegistrationPrompt(user);
-      return;
-    }
-
-    if (message.toUpperCase() === "CONTINUE") {
-      // If the user presses "Continue", we just move to the next step
-      if (user.registrationStep < registrationSteps.length) {
-        user.registrationStep++;
-        await user.save();
-        await sendRegistrationPrompt(user);
-      }
       return;
     }
 
@@ -163,11 +151,12 @@ async function handleRegistration(user, message) {
         } else {
           const [day, month, year] = message.split('/');
           parsedValue = new Date(year, month - 1, day);
-          if (isNaN(parsedValue.getTime())) {
+          if (isNaN(parsedValue.getTime()) || parsedValue >= new Date()) {
             isValid = false;
           }
         }
         break;
+      case "gender":
       case "medicalAidProvider":
         if (step.options && !step.options.includes(message)) {
           isValid = false;
@@ -199,7 +188,7 @@ async function handleRegistration(user, message) {
       }
       user.isRegistrationComplete = true;
       await user.save();
-      await sendWhatsAppMessage(user.phoneNumber, `Thank you for registering, ${user.firstName}! Your registration is now complete.`);
+      await sendWhatsAppMessage(user.phoneNumber, `Thank you for registering, ${user.firstName}! Your registration is now complete. You can now use our WhatsApp medication delivery service.`);
     }
   } catch (error) {
     console.error("Error in handleRegistration:", error);
@@ -213,7 +202,7 @@ async function handleRegistration(user, message) {
 async function sendWelcomeMessage(user) {
   await sendWhatsAppMessage(
     user.phoneNumber,
-    "Thank you for contacting Telepharma Botswana. Let's start the registration process."
+    "Welcome to Telepharma Botswana! To start using our WhatsApp medication delivery service, you need to complete a quick registration process. This will help us serve you better. Let's begin!"
   );
   await sendRegistrationPrompt(user);
 }
@@ -244,7 +233,7 @@ app.post("/webhook", async (req, res) => {
         if (!user.isRegistrationComplete) {
           await handleRegistration(user, messageBody);
         } else {
-          await sendWhatsAppMessage(user.phoneNumber, "Your registration is already complete. How can we assist you today?");
+          await sendWhatsAppMessage(user.phoneNumber, "Your registration is already complete. How can we assist you with our medication delivery service today?");
         }
       }
     } catch (error) {
