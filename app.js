@@ -382,7 +382,7 @@ async function handlePlaceOrder(user, message) {
     case 'DELIVERY_METHOD':
       await handleDeliveryMethod(user, message);
       break;
-    case case 'ENTER_WORK_ADDRESS':
+    case 'ENTER_WORK_ADDRESS':
       user.conversationState.data.set('workAddress', message);
       await finishOrder(user);
       break;
