@@ -74,7 +74,7 @@ async function sendWhatsAppMessage(to, message, buttons = null) {
     text: { body: message },
   };
 
-  if (buttons) {
+  if (buttons && buttons.length > 0) {
     data.type = "interactive";
     data.interactive = {
       type: "button",
@@ -109,17 +109,25 @@ async function sendRegistrationPrompt(user) {
   let buttons = [];
 
   if (step.options) {
-    buttons = step.options.map(option => ({
+    // Limit options to 2 if there are more than 2 options
+    const limitedOptions = step.options.slice(0, 2);
+    buttons = limitedOptions.map(option => ({
       type: "reply",
       reply: { id: option, title: option.substring(0, 20) }
     }));
   }
 
-  if (user.registrationStep > 1) {
+  // Always add "Back" button if not the first step and we have less than 3 buttons
+  if (user.registrationStep > 1 && buttons.length < 3) {
     buttons.push({ type: "reply", reply: { id: "BACK", title: "Back" } });
   }
 
-  await sendWhatsAppMessage(user.phoneNumber, step.prompt, buttons.length > 0 ? buttons : null);
+  // If we have no buttons, add a "Continue" button
+  if (buttons.length === 0) {
+    buttons.push({ type: "reply", reply: { id: "CONTINUE", title: "Continue" } });
+  }
+
+  await sendWhatsAppMessage(user.phoneNumber, step.prompt, buttons);
 }
 
 async function handleRegistration(user, message) {
@@ -129,6 +137,16 @@ async function handleRegistration(user, message) {
       user.registrationData.delete(registrationSteps[user.registrationStep].field);
       await user.save();
       await sendRegistrationPrompt(user);
+      return;
+    }
+
+    if (message.toUpperCase() === "CONTINUE") {
+      // If the user presses "Continue", we just move to the next step
+      if (user.registrationStep < registrationSteps.length) {
+        user.registrationStep++;
+        await user.save();
+        await sendRegistrationPrompt(user);
+      }
       return;
     }
 
