@@ -129,6 +129,8 @@ async function sendWhatsAppMessage(to, message, buttons = null) {
     await axios.post(url, data, { headers });
   } catch (error) {
     console.error("Error sending WhatsApp message:", error.response?.data || error.message);
+    // Send a generic error message to the user
+    await sendWhatsAppMessage(to, "Sorry, we encountered an error. Please try again or contact support if the issue persists.");
   }
 }
 
@@ -257,7 +259,7 @@ async function handleRegistration(user, message) {
 async function sendCompletionMessage(user) {
   const message = `Thank you for registering, ${user.firstName}! Your registration is now complete. You can now use our WhatsApp medication delivery service.`;
   const buttons = [
-    { type: "reply", reply: { id: "PLACE_ORDER", title: "Place An Order" } },
+    { type: "reply", reply: { id: "PLACE_ORDER", title: "Place Order" } },
     { type: "reply", reply: { id: "MAIN_MENU", title: "Main Menu" } },
   ];
   await sendWhatsAppMessage(user.phoneNumber, message, buttons);
@@ -273,7 +275,12 @@ async function sendWelcomeMessage(user) {
 
 async function sendMainMenu(user) {
   const message = "Main Menu:\n0. Place an Order\n1. View Order Status\n2. Medication Delivery\n3. Pharmacy Consultation\n4. Doctor Consultation\n5. General Enquiry";
-  await sendWhatsAppMessage(user.phoneNumber, message);
+  const buttons = [
+    { type: "reply", reply: { id: "PLACE_ORDER", title: "Place Order" } },
+    { type: "reply", reply: { id: "VIEW_ORDER_STATUS", title: "View Order Status" } },
+    { type: "reply", reply: { id: "MEDICATION_DELIVERY", title: "Medication Delivery" } },
+  ];
+  await sendWhatsAppMessage(user.phoneNumber, message, buttons);
 }
 
 async function handleMainMenu(user, message) {
@@ -289,6 +296,7 @@ async function handleMainMenu(user, message) {
       await sendMedicationTypeOptions(user);
       break;
     case "1":
+    case "VIEW_ORDER_STATUS":
       user.conversationState = {
         currentFlow: 'VIEW_ORDER_STATUS',
         currentStep: 'ENTER_ORDER_NUMBER',
@@ -298,6 +306,7 @@ async function handleMainMenu(user, message) {
       await sendWhatsAppMessage(user.phoneNumber, "Please enter your order number.");
       break;
     case "2":
+    case "MEDICATION_DELIVERY":
       user.conversationState = {
         currentFlow: 'MEDICATION_DELIVERY',
         currentStep: 'ENTER_ADDRESS',
@@ -373,7 +382,7 @@ async function handlePlaceOrder(user, message) {
     case 'DELIVERY_METHOD':
       await handleDeliveryMethod(user, message);
       break;
-    case 'ENTER_WORK_ADDRESS':
+    case case 'ENTER_WORK_ADDRESS':
       user.conversationState.data.set('workAddress', message);
       await finishOrder(user);
       break;
@@ -683,6 +692,8 @@ app.post("/webhook", async (req, res) => {
       }
     } catch (error) {
       console.error("Error processing webhook:", error);
+      // Send a generic error message to the user
+      await sendWhatsAppMessage(from, "Sorry, we encountered an error. Please try again or contact support if the issue persists.");
     }
   }
 
