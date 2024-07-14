@@ -9,14 +9,27 @@ dotenv.config();
 const app = express();
 app.use(bodyParser.json());
 
-// Import models
-const {
-  User,
-  Prescription,
-  ServiceRequest,
-  Staff,
-  Inventory,
-} = require("./models");
+// User Schema
+const userSchema = new mongoose.Schema({
+  phoneNumber: { type: String, unique: true, required: true },
+  firstName: { type: String, default: null },
+  surname: { type: String, default: null },
+  dateOfBirth: { type: Date, default: null },
+  medicalAidProvider: { type: String, default: null },
+  medicalAidNumber: { type: String, default: null },
+  scheme: { type: String, default: null },
+  dependentNumber: { type: String, default: null },
+  registrationStep: { type: Number, default: 1 },
+  isRegistrationComplete: { type: Boolean, default: false },
+  lastInteraction: { type: Date, default: Date.now },
+  registrationData: {
+    type: Map,
+    of: String,
+    default: () => new Map(),
+  },
+});
+
+const User = mongoose.model("User", userSchema);
 
 // Connect to MongoDB
 mongoose
@@ -181,7 +194,7 @@ async function handleRegistration(user, message) {
       }
       user.isRegistrationComplete = true;
       await user.save();
-      await sendMainMenu(user);
+      await sendWhatsAppMessage(user.phoneNumber, "Registration complete! Thank you for registering with Telepharma Botswana.");
     }
   } catch (error) {
     console.error("Error in handleRegistration:", error);
@@ -198,153 +211,6 @@ async function sendWelcomeMessage(user) {
     "Welcome to Telepharma Botswana! Let's start the registration process."
   );
   await sendRegistrationPrompt(user);
-}
-
-async function sendMainMenu(user) {
-  await sendWhatsAppMessage(
-    user.phoneNumber,
-    `Welcome back, ${user.firstName}! How can we help you today?`,
-    [
-      {
-        type: "reply",
-        reply: { id: "MEDICATION_DELIVERY", title: "Medication Delivery" },
-      },
-      {
-        type: "reply",
-        reply: {
-          id: "PHARMACY_CONSULTATION",
-          title: "Pharmacy Consultation",
-        },
-      },
-      {
-        type: "reply",
-        reply: { id: "DOCTOR_CONSULTATION", title: "Doctor Consultation" },
-      },
-    ]
-  );
-}
-
-async function handleUserInput(user, message) {
-  switch (message) {
-    case "MEDICATION_DELIVERY":
-      await createServiceRequest(user, "Medication Delivery");
-      await sendWhatsAppMessage(
-        user.phoneNumber,
-        "Do you need Prescription Medicine or Over-the-Counter Medicine?",
-        [
-          {
-            type: "reply",
-            reply: { id: "PRESCRIPTION", title: "Prescription Medicine" },
-          },
-          {
-            type: "reply",
-            reply: { id: "OTC", title: "Over-the-Counter Medicine" },
-          },
-        ]
-      );
-      break;
-    case "PRESCRIPTION":
-      await sendWhatsAppMessage(
-        user.phoneNumber,
-        "Please upload a photo of your prescription or type it out."
-      );
-      break;
-    case "OTC":
-      await sendWhatsAppMessage(
-        user.phoneNumber,
-        "Please provide the name of the over-the-counter medicine you need."
-      );
-      break;
-    case "PHARMACY_CONSULTATION":
-    case "DOCTOR_CONSULTATION":
-      await createServiceRequest(user, message);
-      await sendWhatsAppMessage(
-        user.phoneNumber,
-        "A healthcare professional will be with you shortly. Please wait for their response."
-      );
-      break;
-    case "CHECK_ORDER_STATUS":
-      await sendOrderStatus(user);
-      break;
-    default:
-      if (message.startsWith("http")) {
-        await createPrescription(user, { prescriptionPhotoUrl: message });
-        await sendWhatsAppMessage(
-          user.phoneNumber,
-          "Thank you for providing your prescription. We'll process your request, and a pharmacist will review it. Your medication will be delivered soon."
-        );
-      } else {
-        await createPrescription(user, { prescriptionText: message });
-        await sendWhatsAppMessage(
-          user.phoneNumber,
-          "Thank you for your request. A pharmacist will review it and get back to you soon."
-        );
-      }
-      await sendMainMenu(user);
-  }
-}
-
-async function createServiceRequest(user, serviceType) {
-  const serviceRequest = new ServiceRequest({
-    userId: user._id,
-    serviceType: serviceType,
-    status: "Pending",
-  });
-  await serviceRequest.save();
-}
-
-async function createPrescription(user, prescriptionData) {
-  const prescription = new Prescription({
-    userId: user._id,
-    ...prescriptionData,
-    status: "Pending",
-  });
-  await prescription.save();
-}
-
-async function sendOrderStatus(user) {
-  const recentPrescriptions = await Prescription.find({ userId: user._id })
-    .sort({ createdAt: -1 })
-    .limit(5);
-
-  if (recentPrescriptions.length === 0) {
-    await sendWhatsAppMessage(
-      user.phoneNumber,
-      "You don't have any recent orders. Would you like to place a new order?",
-      [
-        {
-          type: "reply",
-          reply: { id: "MEDICATION_DELIVERY", title: "Place New Order" },
-        },
-        {
-          type: "reply",
-          reply: { id: "MAIN_MENU", title: "Back to Main Menu" },
-        },
-      ]
-    );
-  } else {
-    let statusMessage = "Here are your recent orders:\n\n";
-    recentPrescriptions.forEach((prescription, index) => {
-      statusMessage += `${index + 1}. Order ID: ${
-        prescription._id
-      }\n   Status: ${
-        prescription.status
-      }\n   Created: ${prescription.createdAt.toDateString()}\n\n`;
-    });
-    statusMessage +=
-      "Would you like to place a new order or go back to the main menu?";
-
-    await sendWhatsAppMessage(user.phoneNumber, statusMessage, [
-      {
-        type: "reply",
-        reply: { id: "MEDICATION_DELIVERY", title: "Place New Order" },
-      },
-      {
-        type: "reply",
-        reply: { id: "MAIN_MENU", title: "Back to Main Menu" },
-      },
-    ]);
-  }
 }
 
 app.post("/webhook", async (req, res) => {
@@ -373,7 +239,7 @@ app.post("/webhook", async (req, res) => {
         if (!user.isRegistrationComplete) {
           await handleRegistration(user, messageBody);
         } else {
-          await handleUserInput(user, messageBody);
+          await sendWhatsAppMessage(user.phoneNumber, "Your registration is already complete.");
         }
       }
     } catch (error) {
