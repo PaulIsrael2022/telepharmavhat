@@ -434,11 +434,12 @@ async function handleMainMenu(user, message) {
 
 async function sendMedicationTypeOptions(user) {
   const message = "Medication Details:";
-  const buttons = ["Prescription Medicine", "Over-the-Counter"];
+  //   const buttons = ["Prescription Medicine", "Over-the-Counter"];
+  const buttons = ["Prescription", "OTC"];
   await sendWhatsAppMessage(user.phoneNumber, message, buttons);
   await sendWhatsAppMessage(
     user.phoneNumber,
-    "Enter 00 to go back to the main menu."
+    "Prescription: For prescribed medications\nOTC: For over-the-counter medications\n\nEnter 00 to go back to the main menu."
   );
 }
 
@@ -476,11 +477,11 @@ async function handlePlaceOrder(user, message) {
 
   switch (user.conversationState.currentStep) {
     case "MEDICATION_TYPE":
-      if (message === "Prescription Medicine") {
+      if (message === "Prescription") {
         user.conversationState.currentStep = "PRESCRIPTION_OPTIONS";
         await user.save();
         await sendPrescriptionOptions(user);
-      } else if (message === "Over-the-Counter") {
+      } else if (message === "OTC") {
         user.conversationState.currentStep = "OTC_MEDICATION_LIST";
         await user.save();
         await sendWhatsAppMessage(
