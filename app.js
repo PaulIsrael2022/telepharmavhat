@@ -520,6 +520,13 @@ async function handlePlaceOrder(user, message) {
             contentType: response.headers["content-type"],
           });
 
+          console.log(
+            "Prescription image stored in conversation state:",
+            user.conversationState.data.get("prescriptionImage")
+              ? "Image present"
+              : "Image not present"
+          );
+
           user.conversationState.currentStep = "NEW_PRESCRIPTION_FOR";
           await user.save();
           await sendWhatsAppMessage(
@@ -768,7 +775,7 @@ async function finishOrder(user) {
   // Include prescription image or text
   const prescriptionImage =
     user.conversationState.data.get("prescriptionImage");
-  if (prescriptionImage) {
+  if (prescriptionImage && prescriptionImage.data) {
     orderData.prescriptionImage = {
       data: prescriptionImage.data,
       contentType: prescriptionImage.contentType,
@@ -780,11 +787,13 @@ async function finishOrder(user) {
     orderData.prescriptionText = prescriptionText;
   }
 
+  console.log("Order data before saving:", orderData);
+
   const order = new Order(orderData);
 
   try {
     await order.save();
-    console.log("Order saved successfully:", order);
+    console.log("Order saved successfully:", order.toObject());
 
     let message;
     if (
