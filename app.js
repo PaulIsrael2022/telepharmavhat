@@ -500,6 +500,7 @@ async function handlePlaceOrder(user, message) {
       await handlePrescriptionOptions(user, message);
       break;
     case "OTC_MEDICATION_LIST":
+      // ADD: Set the medications in the conversation state
       user.conversationState.data.set("medications", message);
       user.conversationState.currentStep = "DELIVERY_METHOD";
       await user.save();
@@ -507,6 +508,10 @@ async function handlePlaceOrder(user, message) {
       break;
     case "DELIVERY_METHOD":
       await handleDeliveryMethod(user, message);
+      break;
+    // ADD: New case for DELIVERY_ADDRESS_TYPE
+    case "DELIVERY_ADDRESS_TYPE":
+      await handleDeliveryAddressType(user, message);
       break;
     case "ENTER_WORK_ADDRESS":
       user.conversationState.data.set("workAddress", message);
@@ -692,7 +697,9 @@ async function finishOrder(user) {
     user: user._id,
     orderNumber: generateOrderNumber(),
     orderType: user.conversationState.data.get("orderType"),
-    medications: [{ name: user.conversationState.data.get("medications") }],
+    medications: user.conversationState.data.get("medications")
+      ? [{ name: user.conversationState.data.get("medications") }]
+      : [{ name: "To be specified" }],
     deliveryMethod: user.conversationState.data.get("deliveryMethod"),
     deliveryAddress: {
       type: user.conversationState.data.get("workAddress") ? "WORK" : "HOME",
