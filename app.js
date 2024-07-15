@@ -482,6 +482,8 @@ async function handlePlaceOrder(user, message) {
         await user.save();
         await sendPrescriptionOptions(user);
       } else if (message === "OTC") {
+        // ADD: Set the orderType for OTC orders
+        user.conversationState.data.set("orderType", "OVER_THE_COUNTER");
         user.conversationState.currentStep = "OTC_MEDICATION_LIST";
         await user.save();
         await sendWhatsAppMessage(
@@ -696,7 +698,9 @@ async function finishOrder(user) {
   const order = new Order({
     user: user._id,
     orderNumber: generateOrderNumber(),
-    orderType: user.conversationState.data.get("orderType"),
+    // EDIT: Ensure orderType is always set
+    orderType:
+      user.conversationState.data.get("orderType") || "OVER_THE_COUNTER",
     medications: user.conversationState.data.get("medications")
       ? [{ name: user.conversationState.data.get("medications") }]
       : [{ name: "To be specified" }],
