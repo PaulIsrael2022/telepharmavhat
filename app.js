@@ -69,7 +69,11 @@ const orderSchema = new mongoose.Schema(
         instructions: { type: String },
       },
     ],
-    prescriptionImage: { type: String }, // URL to stored image
+    prescriptionImage: {
+      data: Buffer,
+      contentType: String,
+    },
+    prescriptionText: { type: String }, // URL to stored image
     forDependant: { type: Boolean, default: false },
     dependantDetails: {
       firstName: { type: String },
@@ -501,6 +505,39 @@ async function handlePlaceOrder(user, message) {
     case "PRESCRIPTION_OPTIONS":
       await handlePrescriptionOptions(user, message);
       break;
+    case "UPLOAD_PRESCRIPTION":
+      if (message.type === "image") {
+        try {
+          // Download the image
+          const response = await axios.get(message.image.url, {
+            responseType: "arraybuffer",
+          });
+          const imageBuffer = Buffer.from(response.data, "binary");
+
+          // Store the image data in the conversation state
+          user.conversationState.data.set("prescriptionImage", {
+            data: imageBuffer,
+            contentType: response.headers["content-type"],
+          });
+
+          user.conversationState.currentStep = "NEW_PRESCRIPTION_FOR";
+          await user.save();
+          await sendNewPrescriptionOptions(user);
+        } catch (error) {
+          console.error("Error downloading prescription image:", error);
+          await sendWhatsAppMessage(
+            user.phoneNumber,
+            "We encountered an error processing your prescription image. Please try uploading it again."
+          );
+        }
+      } else {
+        // If it's text, treat it as typed prescription
+        user.conversationState.data.set("prescriptionText", message);
+        user.conversationState.currentStep = "NEW_PRESCRIPTION_FOR";
+        await user.save();
+        await sendNewPrescriptionOptions(user);
+      }
+      break;
     case "OTC_MEDICATION_LIST":
       // ADD: Set the medications in the conversation state
       user.conversationState.data.set("medications", message);
@@ -572,11 +609,13 @@ async function handlePrescriptionOptions(user, message) {
       await sendRefillOptions(user);
       break;
     case "New Prescription":
-      user.conversationState.currentStep = "NEW_PRESCRIPTION_FOR";
+      user.conversationState.currentStep = "UPLOAD_PRESCRIPTION";
       user.conversationState.data.set("orderType", "NEW_PRESCRIPTION");
       await user.save();
-      await sendNewPrescriptionOptions(user);
-      break;
+      await sendWhatsAppMessage(
+        user.phoneNumber,
+        "Please upload a photo of your prescription or type it out."
+      );
     case "0":
       user.conversationState = {
         currentFlow: "MAIN_MENU",
@@ -714,10 +753,27 @@ async function finishOrder(user) {
     status: "PENDING",
   });
 
+  // ADD: Include prescription image or text
+  const prescriptionImage =
+    user.conversationState.data.get("prescriptionImage");
+  if (prescriptionImage) {
+    orderData.prescriptionImage = prescriptionImage;
+  }
+
+  const prescriptionText = user.conversationState.data.get("prescriptionText");
+  if (prescriptionText) {
+    orderData.prescriptionText = prescriptionText;
+  }
+
   await order.save();
 
   let message;
-  if (order.deliveryMethod === "DELIVERY") {
+  if (
+    order.orderType === "NEW_PRESCRIPTION" ||
+    order.orderType === "PRESCRIPTION_REFILL"
+  ) {
+    message = `Thank you for providing your prescription, ${user.firstName}. We'll process your request, and a pharmacist will review it. Your medication will be delivered soon.`;
+  } else if (order.deliveryMethod === "DELIVERY") {
     message = `Thank you for your order, ${user.firstName}! Your medication will be delivered soon.`;
   } else {
     message = `Thank you for your order, ${user.firstName}! Your medication will be ready for pickup soon.`;
