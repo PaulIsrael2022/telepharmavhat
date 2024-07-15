@@ -795,16 +795,17 @@ async function finishOrder(user) {
     await order.save();
     console.log("Order saved successfully:", order.toObject());
 
+    // EDIT: Modified confirmation messages to include order number
     let message;
     if (
       order.orderType === "NEW_PRESCRIPTION" ||
       order.orderType === "PRESCRIPTION_REFILL"
     ) {
-      message = `Thank you for providing your prescription, ${user.firstName}. We'll process your request, and a pharmacist will review it. Your medication will be delivered soon.`;
+      message = `Thank you for providing your prescription, ${user.firstName}. Your order number is ${order.orderNumber}. We'll process your request, and a pharmacist will review it. Your medication will be delivered soon.`;
     } else if (order.deliveryMethod === "DELIVERY") {
-      message = `Thank you for your order, ${user.firstName}! Your medication will be delivered soon.`;
+      message = `Thank you for your order, ${user.firstName}! Your order number is ${order.orderNumber}. Your medication will be delivered soon.`;
     } else {
-      message = `Thank you for your order, ${user.firstName}! Your medication will be ready for pickup soon.`;
+      message = `Thank you for your order, ${user.firstName}! Your order number is ${order.orderNumber}. Your medication will be ready for pickup soon.`;
     }
 
     await sendWhatsAppMessage(user.phoneNumber, message);
