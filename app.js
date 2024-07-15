@@ -530,6 +530,11 @@ async function handlePlaceOrder(user, message) {
             "We encountered an error processing your prescription image. Please try uploading it again."
           );
         }
+      } else if (message === "00") {
+        // Go back to the previous step
+        user.conversationState.currentStep = "PRESCRIPTION_OPTIONS";
+        await user.save();
+        await sendPrescriptionOptions(user);
       } else {
         // If it's text, treat it as typed prescription
         user.conversationState.data.set("prescriptionText", message);
@@ -614,8 +619,9 @@ async function handlePrescriptionOptions(user, message) {
       await user.save();
       await sendWhatsAppMessage(
         user.phoneNumber,
-        "Please upload a photo of your prescription or type it out."
+        "Please upload a photo of your prescription or type it out.\n\nEnter 00 to go back to the previous step."
       );
+      break;
     case "0":
       user.conversationState = {
         currentFlow: "MAIN_MENU",
