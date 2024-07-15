@@ -522,6 +522,10 @@ async function handlePlaceOrder(user, message) {
 
           user.conversationState.currentStep = "NEW_PRESCRIPTION_FOR";
           await user.save();
+          await sendWhatsAppMessage(
+            user.phoneNumber,
+            "Prescription image received. Thank you."
+          );
           await sendNewPrescriptionOptions(user);
         } catch (error) {
           console.error("Error downloading prescription image:", error);
@@ -540,6 +544,10 @@ async function handlePlaceOrder(user, message) {
         user.conversationState.data.set("prescriptionText", message);
         user.conversationState.currentStep = "NEW_PRESCRIPTION_FOR";
         await user.save();
+        await sendWhatsAppMessage(
+          user.phoneNumber,
+          "Prescription text received. Thank you."
+        );
         await sendNewPrescriptionOptions(user);
       }
       break;
@@ -739,11 +747,9 @@ async function handleDeliveryAddressType(user, message) {
 }
 
 async function finishOrder(user) {
-  // Create a new order in the database
-  const order = new Order({
+  const orderData = {
     user: user._id,
     orderNumber: generateOrderNumber(),
-    // EDIT: Ensure orderType is always set
     orderType:
       user.conversationState.data.get("orderType") || "OVER_THE_COUNTER",
     medications: user.conversationState.data.get("medications")
@@ -757,13 +763,16 @@ async function finishOrder(user) {
         user.conversationState.data.get("homeAddress"),
     },
     status: "PENDING",
-  });
+  };
 
-  // ADD: Include prescription image or text
+  // Include prescription image or text
   const prescriptionImage =
     user.conversationState.data.get("prescriptionImage");
   if (prescriptionImage) {
-    orderData.prescriptionImage = prescriptionImage;
+    orderData.prescriptionImage = {
+      data: prescriptionImage.data,
+      contentType: prescriptionImage.contentType,
+    };
   }
 
   const prescriptionText = user.conversationState.data.get("prescriptionText");
@@ -771,32 +780,52 @@ async function finishOrder(user) {
     orderData.prescriptionText = prescriptionText;
   }
 
-  await order.save();
+  const order = new Order(orderData);
 
-  let message;
-  if (
-    order.orderType === "NEW_PRESCRIPTION" ||
-    order.orderType === "PRESCRIPTION_REFILL"
-  ) {
-    message = `Thank you for providing your prescription, ${user.firstName}. We'll process your request, and a pharmacist will review it. Your medication will be delivered soon.`;
-  } else if (order.deliveryMethod === "DELIVERY") {
-    message = `Thank you for your order, ${user.firstName}! Your medication will be delivered soon.`;
-  } else {
-    message = `Thank you for your order, ${user.firstName}! Your medication will be ready for pickup soon.`;
+  try {
+    await order.save();
+    console.log("Order saved successfully:", order);
+
+    let message;
+    if (
+      order.orderType === "NEW_PRESCRIPTION" ||
+      order.orderType === "PRESCRIPTION_REFILL"
+    ) {
+      message = `Thank you for providing your prescription, ${user.firstName}. We'll process your request, and a pharmacist will review it. Your medication will be delivered soon.`;
+    } else if (order.deliveryMethod === "DELIVERY") {
+      message = `Thank you for your order, ${user.firstName}! Your medication will be delivered soon.`;
+    } else {
+      message = `Thank you for your order, ${user.firstName}! Your medication will be ready for pickup soon.`;
+    }
+
+    await sendWhatsAppMessage(user.phoneNumber, message);
+
+    // Reset conversation state
+    user.conversationState = {
+      currentFlow: "MAIN_MENU",
+      currentStep: null,
+      data: new Map(),
+      lastUpdated: new Date(),
+    };
+    await user.save();
+
+    await sendMainMenu(user);
+  } catch (error) {
+    console.error("Error saving order:", error);
+    await sendWhatsAppMessage(
+      user.phoneNumber,
+      "We encountered an error processing your order. Please try again or contact support."
+    );
+    // Return to main menu
+    user.conversationState = {
+      currentFlow: "MAIN_MENU",
+      currentStep: null,
+      data: new Map(),
+      lastUpdated: new Date(),
+    };
+    await user.save();
+    await sendMainMenu(user);
   }
-
-  await sendWhatsAppMessage(user.phoneNumber, message);
-
-  // Reset conversation state
-  user.conversationState = {
-    currentFlow: "MAIN_MENU",
-    currentStep: null,
-    data: new Map(),
-    lastUpdated: new Date(),
-  };
-  await user.save();
-
-  await sendMainMenu(user);
 }
 
 function generateOrderNumber() {
