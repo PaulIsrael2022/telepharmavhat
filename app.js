@@ -118,20 +118,42 @@ const PHONE_NUMBER_ID = process.env.WHATSAPP_CLOUD_API_FROM_PHONE_NUMBER_ID;
 const ACCESS_TOKEN = process.env.WHATSAPP_CLOUD_API_ACCESS_TOKEN;
 
 // Helper function to send WhatsApp messages
-async function sendWhatsAppMessage(to, message) {
+async function sendWhatsAppMessage(to, message, buttons = null) {
   const url = `${WHATSAPP_API_URL}/${PHONE_NUMBER_ID}/messages`;
   const headers = {
     Authorization: `Bearer ${ACCESS_TOKEN}`,
     "Content-Type": "application/json",
   };
 
-  const data = {
+  let data = {
     messaging_product: "whatsapp",
     recipient_type: "individual",
     to: to,
     type: "text",
     text: { body: message },
   };
+
+  if (buttons) {
+    data = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: message },
+        action: {
+          buttons: buttons.map((button, index) => ({
+            type: "reply",
+            reply: {
+              id: `button_${index + 1}`,
+              title: button,
+            },
+          })),
+        },
+      },
+    };
+  }
 
   try {
     await axios.post(url, data, { headers });
@@ -188,7 +210,7 @@ async function sendRegistrationPrompt(user) {
   let message = step.prompt;
 
   if (user.conversationState.currentStep > 0) {
-    message += '\n\n_Enter "00" to go back to the previous step._';
+    message += '\n\nEnter "00" to go back to the previous step.';
   }
 
   await sendWhatsAppMessage(user.phoneNumber, message);
@@ -346,7 +368,7 @@ async function handleMainMenu(user, message) {
       await user.save();
       await sendWhatsAppMessage(
         user.phoneNumber,
-        "Please enter your order number."
+        "Please enter your order number.\n\nEnter 00 to go back to the main menu."
       );
       break;
     case "3":
@@ -359,7 +381,7 @@ async function handleMainMenu(user, message) {
       await user.save();
       await sendWhatsAppMessage(
         user.phoneNumber,
-        "Please enter your delivery address."
+        "Please enter your delivery address.\n\nEnter 00 to go back to the main menu."
       );
       break;
     case "4":
@@ -372,7 +394,7 @@ async function handleMainMenu(user, message) {
       await user.save();
       await sendWhatsAppMessage(
         user.phoneNumber,
-        "Please describe your issue or question for the pharmacy."
+        "Please describe your issue or question for the pharmacy.\n\nEnter 00 to go back to the main menu."
       );
       break;
     case "5":
@@ -385,7 +407,7 @@ async function handleMainMenu(user, message) {
       await user.save();
       await sendWhatsAppMessage(
         user.phoneNumber,
-        "Please describe your issue or question for the doctor."
+        "Please describe your issue or question for the doctor.\n\nEnter 00 to go back to the main menu."
       );
       break;
     case "6":
@@ -398,7 +420,7 @@ async function handleMainMenu(user, message) {
       await user.save();
       await sendWhatsAppMessage(
         user.phoneNumber,
-        "Please enter your general enquiry."
+        "Please enter your general enquiry.\n\nEnter 00 to go back to the main menu."
       );
       break;
     default:
@@ -411,24 +433,59 @@ async function handleMainMenu(user, message) {
 }
 
 async function sendMedicationTypeOptions(user) {
-  const message =
-    "Medication Details:\n1. Prescription Medicine\n2. Over-the-Counter";
-  await sendWhatsAppMessage(user.phoneNumber, message);
+  const message = "Medication Details:";
+  const buttons = ["Prescription Medicine", "Over-the-Counter"];
+  await sendWhatsAppMessage(user.phoneNumber, message, buttons);
+  await sendWhatsAppMessage(
+    user.phoneNumber,
+    "Enter 00 to go back to the main menu."
+  );
 }
 
 async function handlePlaceOrder(user, message) {
+  if (message === "00") {
+    if (user.conversationState.currentStep === "MEDICATION_TYPE") {
+      user.conversationState = {
+        currentFlow: "MAIN_MENU",
+        currentStep: null,
+        data: new Map(),
+        lastUpdated: new Date(),
+      };
+      await user.save();
+      await sendMainMenu(user);
+      return;
+    } else {
+      // Go back to the previous step
+      const steps = [
+        "MEDICATION_TYPE",
+        "PRESCRIPTION_OPTIONS",
+        "OTC_MEDICATION_LIST",
+        "DELIVERY_METHOD",
+        "ENTER_WORK_ADDRESS",
+        "ENTER_HOME_ADDRESS",
+      ];
+      const currentIndex = steps.indexOf(user.conversationState.currentStep);
+      if (currentIndex > 0) {
+        user.conversationState.currentStep = steps[currentIndex - 1];
+        await user.save();
+        await handlePlaceOrder(user, ""); // Resend the previous step's message
+        return;
+      }
+    }
+  }
+
   switch (user.conversationState.currentStep) {
     case "MEDICATION_TYPE":
-      if (message === "1") {
+      if (message === "Prescription Medicine") {
         user.conversationState.currentStep = "PRESCRIPTION_OPTIONS";
         await user.save();
         await sendPrescriptionOptions(user);
-      } else if (message === "2") {
+      } else if (message === "Over-the-Counter") {
         user.conversationState.currentStep = "OTC_MEDICATION_LIST";
         await user.save();
         await sendWhatsAppMessage(
           user.phoneNumber,
-          "Please enter a list of medications you would like to order."
+          "Please enter a list of medications you would like to order.\n\nEnter 00 to go back to the previous step."
         );
       } else {
         await sendWhatsAppMessage(
@@ -458,6 +515,20 @@ async function handlePlaceOrder(user, message) {
       user.conversationState.data.set("homeAddress", message);
       await finishOrder(user);
       break;
+    case "NEW_PRESCRIPTION_FOR":
+      if (message === "Principal Member" || message === "Dependant") {
+        user.conversationState.data.set("prescriptionFor", message);
+        user.conversationState.currentStep = "DELIVERY_METHOD";
+        await user.save();
+        await sendDeliveryOptions(user);
+      } else {
+        await sendWhatsAppMessage(
+          user.phoneNumber,
+          "Invalid option. Please try again."
+        );
+        await sendNewPrescriptionOptions(user);
+      }
+      break;
     default:
       await sendWhatsAppMessage(
         user.phoneNumber,
@@ -475,26 +546,30 @@ async function handlePlaceOrder(user, message) {
 }
 
 async function sendPrescriptionOptions(user) {
-  const message =
-    "Prescription Options:\n1. Prescription Refill\n2. New Prescription\n3. Main Menu";
-  await sendWhatsAppMessage(user.phoneNumber, message);
+  const message = "Prescription Options:";
+  const buttons = ["Prescription Refill", "New Prescription"];
+  await sendWhatsAppMessage(user.phoneNumber, message, buttons);
+  await sendWhatsAppMessage(
+    user.phoneNumber,
+    "Enter 0 to go back to Main Menu\nEnter 00 to go back to the previous step."
+  );
 }
 
 async function handlePrescriptionOptions(user, message) {
   switch (message) {
-    case "1":
+    case "Prescription Refill":
       user.conversationState.currentStep = "SELECT_REFILL";
       user.conversationState.data.set("orderType", "PRESCRIPTION_REFILL");
       await user.save();
       await sendRefillOptions(user);
       break;
-    case "2":
+    case "New Prescription":
       user.conversationState.currentStep = "NEW_PRESCRIPTION_FOR";
       user.conversationState.data.set("orderType", "NEW_PRESCRIPTION");
       await user.save();
       await sendNewPrescriptionOptions(user);
       break;
-    case "3":
+    case "0":
       user.conversationState = {
         currentFlow: "MAIN_MENU",
         currentStep: null,
@@ -517,35 +592,44 @@ async function sendRefillOptions(user) {
   // In a real-world scenario, you would fetch the user's last three orders from the database
   // For this example, we'll use placeholder data
   const message =
-    "Select Your Refill:\n1. Medication A\n2. Medication B\n3. Medication C";
+    "Select Your Refill:\n1. Medication A\n2. Medication B\n3. Medication C\n\nEnter 00 to go back to the previous step.";
   await sendWhatsAppMessage(user.phoneNumber, message);
 }
 
 async function sendNewPrescriptionOptions(user) {
-  const message =
-    "Who is the prescription for?\n1. Principal Member\n2. Dependant";
-  await sendWhatsAppMessage(user.phoneNumber, message);
+  const message = "Who is the prescription for?";
+  const buttons = ["Principal Member", "Dependant"];
+  await sendWhatsAppMessage(user.phoneNumber, message, buttons);
+  await sendWhatsAppMessage(
+    user.phoneNumber,
+    "Enter 00 to go back to the previous step."
+  );
 }
 
 async function sendDeliveryOptions(user) {
   const message =
-    "Would you like the medication to be delivered, or will you be picking it up?\n1. Delivery\n2. Pickup\n3. Main Menu";
-  await sendWhatsAppMessage(user.phoneNumber, message);
+    "Would you like the medication to be delivered, or will you be picking it up?";
+  const buttons = ["Delivery", "Pickup"];
+  await sendWhatsAppMessage(user.phoneNumber, message, buttons);
+  await sendWhatsAppMessage(
+    user.phoneNumber,
+    "Enter 0 to go back to Main Menu\nEnter 00 to go back to the previous step."
+  );
 }
 
 async function handleDeliveryMethod(user, message) {
   switch (message) {
-    case "1":
+    case "Delivery":
       user.conversationState.currentStep = "DELIVERY_ADDRESS_TYPE";
       user.conversationState.data.set("deliveryMethod", "DELIVERY");
       await user.save();
       await sendDeliveryAddressOptions(user);
       break;
-    case "2":
+    case "Pickup":
       user.conversationState.data.set("deliveryMethod", "PICKUP");
       await finishOrder(user);
       break;
-    case "3":
+    case "0":
       user.conversationState = {
         currentFlow: "MAIN_MENU",
         currentStep: null,
@@ -565,27 +649,31 @@ async function handleDeliveryMethod(user, message) {
 }
 
 async function sendDeliveryAddressOptions(user) {
-  const message =
-    "Where do you want your medication to be delivered?\n1. Work\n2. Home";
-  await sendWhatsAppMessage(user.phoneNumber, message);
+  const message = "Where do you want your medication to be delivered?";
+  const buttons = ["Work", "Home"];
+  await sendWhatsAppMessage(user.phoneNumber, message, buttons);
+  await sendWhatsAppMessage(
+    user.phoneNumber,
+    "Enter 00 to go back to the previous step."
+  );
 }
 
 async function handleDeliveryAddressType(user, message) {
   switch (message) {
-    case "1":
+    case "Work":
       user.conversationState.currentStep = "ENTER_WORK_ADDRESS";
       await user.save();
       await sendWhatsAppMessage(
         user.phoneNumber,
-        "Please enter your work name and physical address."
+        "Please enter your work name and physical address.\n\nEnter 00 to go back to the previous step."
       );
       break;
-    case "2":
+    case "Home":
       user.conversationState.currentStep = "ENTER_HOME_ADDRESS";
       await user.save();
       await sendWhatsAppMessage(
         user.phoneNumber,
-        "Please enter your home address."
+        "Please enter your home address.\n\nEnter 00 to go back to the previous step."
       );
       break;
     default:
@@ -723,80 +811,100 @@ async function handleConversation(user, message) {
 }
 
 async function handleViewOrderStatus(user, message) {
+  if (message === "00") {
+    user.conversationState = {
+      currentFlow: "MAIN_MENU",
+      currentStep: null,
+      data: new Map(),
+      lastUpdated: new Date(),
+    };
+    await user.save();
+    await sendMainMenu(user);
+    return;
+  }
+
   // In a real-world scenario, you would fetch the order status from the database
   // For this example, we'll use a placeholder response
   await sendWhatsAppMessage(
     user.phoneNumber,
-    `Your order status for order number ${message} is: Processing`
+    `Your order status for order number ${message} is: Processing\n\nEnter 00 to go back to the main menu.`
   );
-  user.conversationState = {
-    currentFlow: "MAIN_MENU",
-    currentStep: null,
-    data: new Map(),
-    lastUpdated: new Date(),
-  };
-  await user.save();
-  await sendMainMenu(user);
 }
 
 async function handleMedicationDelivery(user, message) {
+  if (message === "00") {
+    user.conversationState = {
+      currentFlow: "MAIN_MENU",
+      currentStep: null,
+      data: new Map(),
+      lastUpdated: new Date(),
+    };
+    await user.save();
+    await sendMainMenu(user);
+    return;
+  }
+
   await sendWhatsAppMessage(
     user.phoneNumber,
-    `Your medication will be delivered to ${message}.`
+    `Your medication will be delivered to ${message}.\n\nEnter 00 to go back to the main menu.`
   );
-  user.conversationState = {
-    currentFlow: "MAIN_MENU",
-    currentStep: null,
-    data: new Map(),
-    lastUpdated: new Date(),
-  };
-  await user.save();
-  await sendMainMenu(user);
 }
 
 async function handlePharmacyConsultation(user, message) {
+  if (message === "00") {
+    user.conversationState = {
+      currentFlow: "MAIN_MENU",
+      currentStep: null,
+      data: new Map(),
+      lastUpdated: new Date(),
+    };
+    await user.save();
+    await sendMainMenu(user);
+    return;
+  }
+
   await sendWhatsAppMessage(
     user.phoneNumber,
-    "Thank you. A pharmacy consultant will get back to you shortly."
+    "Thank you. A pharmacy consultant will get back to you shortly.\n\nEnter 00 to go back to the main menu."
   );
-  user.conversationState = {
-    currentFlow: "MAIN_MENU",
-    currentStep: null,
-    data: new Map(),
-    lastUpdated: new Date(),
-  };
-  await user.save();
-  await sendMainMenu(user);
 }
 
 async function handleDoctorConsultation(user, message) {
+  if (message === "00") {
+    user.conversationState = {
+      currentFlow: "MAIN_MENU",
+      currentStep: null,
+      data: new Map(),
+      lastUpdated: new Date(),
+    };
+    await user.save();
+    await sendMainMenu(user);
+    return;
+  }
+
   await sendWhatsAppMessage(
     user.phoneNumber,
-    "Thank you. A doctor will get back to you shortly."
+    "Thank you. A doctor will get back to you shortly.\n\nEnter 00 to go back to the main menu."
   );
-  user.conversationState = {
-    currentFlow: "MAIN_MENU",
-    currentStep: null,
-    data: new Map(),
-    lastUpdated: new Date(),
-  };
-  await user.save();
-  await sendMainMenu(user);
 }
 
 async function handleGeneralEnquiry(user, message) {
+  if (message === "00") {
+    user.conversationState = {
+      currentFlow: "MAIN_MENU",
+      currentStep: null,
+      data: new Map(),
+      lastUpdated: new Date(),
+    };
+    await user.save();
+    await sendMainMenu(user);
+    return;
+  }
+
   await sendWhatsAppMessage(
     user.phoneNumber,
-    "Thank you. We will address your enquiry as soon as possible."
+    "Thank you. We will address your enquiry as soon as possible.\n\nEnter 00 to go back to the main menu."
   );
-  user.conversationState = {
-    currentFlow: "MAIN_MENU",
-    currentStep: null,
-    data: new Map(),
-    lastUpdated: new Date(),
-  };
-  await user.save();
-  await sendMainMenu(user);
 }
 
 // Periodic cleanup function
@@ -829,7 +937,12 @@ app.post("/webhook", async (req, res) => {
   if (entry && entry[0].changes && entry[0].changes[0].value.messages) {
     const message = entry[0].changes[0].value.messages[0];
     const from = message.from;
-    const messageBody = message.text?.body || "";
+    let messageBody = message.text?.body || "";
+
+    // Handle button responses
+    if (message.interactive && message.interactive.button_reply) {
+      messageBody = message.interactive.button_reply.title;
+    }
 
     try {
       let user = await User.findOne({ phoneNumber: from });
