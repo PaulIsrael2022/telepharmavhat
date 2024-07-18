@@ -341,7 +341,7 @@ async function sendMainMenu(user) {
 
 async function sendMoreOptions(user) {
   const message = "More Options:";
-  const buttons = ["Pharmacy Consultation", "General Enquiry"];
+  const buttons = ["Med Consultation", "General Enquiry"];
   await sendWhatsAppMessage(user.phoneNumber, message, buttons);
   await sendWhatsAppMessage(
     user.phoneNumber,
